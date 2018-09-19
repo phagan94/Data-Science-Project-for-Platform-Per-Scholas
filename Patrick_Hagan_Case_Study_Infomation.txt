@@ -1,0 +1,704 @@
+Step 01: Define and LOAD MYSQL Tables
+Begin by running the MYSQL Script CDW_SAP.sql, which has been provided to create and load the CDW_SAPP database and the three tables: 
+1) CDW_SAPP_BRANCH  for bank information (Figure 1), 
+2) CDW_SAPP_CREDITCARD for Credit Card Information (Figure 2), 
+3) CDW_SAPP_CUSTOMER  for CDW customer information  (Figure 3). 
+4) CDW_SAPP_D_TIME created from CDW_SAPP_CREDITCARD. (figure 4). 
+
+The SQL below gives the basic structure of the current SQL data. A similar structure will be created in Apache Hadoop Hive in order to hold and analyze all the Branch, 
+Customer, and Credit Card data.
+Note the constraints on the MYSQL tables:
+1) The primary key on CDW_SAPP_BRANCH is the BRANCH_CODE, which must be an integer with a maximum length of 9. There are no foreign keys on the CDW_SAPP_BRANCH.
+2) The primary key on CDW_SAPP_CREDITCARD is the TRANSACTION_ID, which must be an integer with a maximum length of 9. All foreign key relationships are associated 
+with the CDW_SAPP_CREDIT_CARD information. 
+  A) There is a foreign key relationship with the CREDIT_CARD_NO and the CUST_SSN fields in the CDW_SAPP_CREDITCARD table to enable easier searches by CREDIT_CARD_NO and CUST_SSN.
+  B) There is a foreign key relationship with the BRANCH_CODE field in the CDW_SAPP_CREDITCARD table to enable easier searches and grouping by BRANCH_CODE.
+  C) The BRANCH_CODE in the CDW_SAPP_CREDITCARD must exist in the CDW_SAPP_BRANCH table to be valid.
+  D) The fields CREDIT_CARD_NO and CUST_SSN in the CDW_SAPP_CREDITCARD table must exist in the CDW_SAPP_CUSTOMER table to be valid. 
+3)  The primary key on CDW_SAPP_CUSTOMER is a combined key of the maximum of 16 characters CREDIT_CARD_NO and the nine digit SSN. There are no foreign keys on the CDW_SAPP_CUSTOMER.
+
+Do SQL DESCRIBE and SELECT 5 records from all three tables to check the format and for reference later when testing the programming logic and Hadoop Hive definitions and load.
+Figure 1: Table structure for table `CDW_SAPP_BRANCH`
+CREATE TABLE `CDW_SAPP_BRANCH` (
+  `BRANCH_CODE `      int(9)      NOT NULL,
+  `BRANCH_NAME`       varchar(25) DEFAULT NULL,
+  `BRANCH_STREET`     varchar(30) DEFAULT NULL,
+  `BRANCH_CITY`       varchar(30) NOT NULL,
+  `BRANCH_STATE`      varchar(30) DEFAULT NULL,
+  `BRANCH_ZIP`        int(7)      DEFAULT NULL,
+  `BRANCH_PHONE`      varchar(10) DEFAULT NULL,
+  `LAST_UPDATED`      timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`BRANCH_CODE`)
+)
+
+Figure 2: Table structure for table `CDW_SAPP_CREDITCARD`
+CREATE TABLE `CDW_SAPP_CREDITCARD` (
+  `TRANSACTION_ID`          int(9)        NOT NULL,
+  `DAY`                     int(2)        NOT NULL,
+  `MONTH`                   int(2)        DEFAULT NULL,
+  `YEAR`                    int(4)        DEFAULT NULL,
+  `CREDIT_CARD_NO`          varchar(16)   DEFAULT NULL,
+  `CUST_SSN`                int(9)        DEFAULT NULL,
+  `BRANCH_CODE`             int(9)        DEFAULT NULL,
+  `TRANSACTION_TYPE`        varchar(30)   DEFAULT NULL,
+  `TRANSACTION_VALUE`       decimal(20,3) DEFAULT NULL,
+  PRIMARY KEY (`TRANSACTION_ID`),
+  KEY `FK_CARDCUST` (`CREDIT_CARD_NO`,`CUST_SSN`),
+  KEY `FK_CARDBRANCH` (`BRANCH_CODE`),
+  CONSTRAINT `FK_CARDBRANCH` FOREIGN KEY (`BRANCH_CODE`) REFERENCES `CDW_SAPP_BRANCH` (`BRANCH_CODE`),
+  CONSTRAINT `FK_CARDCUST` FOREIGN KEY (`CREDIT_CARD_NO`, `CUST_SSN`) REFERENCES `CDW_SAPP_CUSTOMER` (`CREDIT_CARD_NO`, `SSN`)
+) 
+
+Figure 3: Table structure for table `CDW_SAPP_CUSTOMER`
+CREATE TABLE `CDW_SAPP_CUSTOMER` (
+  `FIRST_NAME`            varchar(40) NOT NULL,
+  `MIDDLE_NAME`           varchar(40) DEFAULT NULL,
+  `LAST_NAME`             varchar(40) DEFAULT NULL,
+  `SSN`                   int(9)      NOT NULL,
+  `CREDIT_CARD_NO`        varchar(16) NOT NULL DEFAULT '',
+  `APT_NO`                varchar(7)  DEFAULT NULL,
+  `STREET_NAME`           varchar(30) DEFAULT NULL,
+  `CUST_CITY`             varchar(30) NOT NULL,
+  `CUST_STATE`            varchar(30) DEFAULT NULL,
+  `CUST_COUNTRY`          varchar(30) DEFAULT NULL,
+  `CUST_ZIP`              varchar(7)  DEFAULT NULL,
+  `CUST_PHONE`            int(10)     DEFAULT NULL,
+  `CUST_EMAIL`            varchar(40) DEFAULT NULL,
+  `LAST_UPDATED`          timestamp   DEFAULT NOT NULL CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`CREDIT_CARD_NO`,`SSN`)
+)
+
+Figure 4: Table structure for table `CDW_SAPP_D-TIME` 
+CREATE TABLE `CDW_SAPP_D_TIME` (
+  `TIME_TIME_ID`          varchar(8)          NOT NULL,
+  `TIME_DAY`              int(2)     zerofill NULL,
+  `TIME_MONTH`            int(2)     zerofill NULL,
+  `TIME_QUARTER`          varchar(8)          NOT NULL,
+  `TIME_YEAR`             int(4)     zerofill NULL,
+  PRIMARY KEY (`TIME_TIME_ID`)
+) 
+
+DROP TABLE IF EXISTS `CDW_SAPP_D_TIME`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `CDW_SAPP_D_TIME` (
+  `TIME_TIME_ID`          varchar(8)          NOT NULL,
+  `TIME_DAY`              int(2)     zerofill NULL,
+  `TIME_MONTH`            int(2)     zerofill NULL,
+  `TIME_QUARTER`          varchar(8)          NOT NULL,
+  `TIME_YEAR`             int(4)     zerofill NULL,
+  PRIMARY KEY (`TIME_TIME_ID`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Loadng data for table `CDW_SAPP_D_TIME`
+--
+
+LOCK TABLES `CDW_SAPP_D_TIME` WRITE, `CDW_SAPP_CREDITCARD` AS CC READ;
+/*!40000 ALTER TABLE `CDW_SAPP_D_TIME` DISABLE KEYS */;
+INSERT INTO `CDW_SAPP_D_TIME` (TIME_TIME_ID, TIME_DAY, TIME_MONTH, TIME_QUARTER, TIME_YEAR)
+ SELECT DISTINCT(CONCAT(CC.YEAR, LPAD(CC.MONTH, 2, 0), LPAD(CC.DAY, 2, 0))) AS TIMEID, 
+   CC.DAY, 
+   CC.MONTH, 
+   (concat(CC.YEAR, 
+     (case 
+        when CC.MONTH in (1, 2, 3) then '0331'
+        when CC.MONTH in (4, 5, 6) then '0631'
+        when CC.MONTH in (7, 8, 9) then '0930'
+        else '1231'
+      end)
+    )
+   ), 
+   CC.YEAR
+   FROM CDW_SAPP_CREDITCARD CC
+   ORDER BY TIMEID
+   ;
+UNLOCK TABLES;
+
+Step 2: Create Corresponding Apache Hive Tables (Use hive as high level qualifier)  
+Based on the information in the MYSQL figures above create an Apache Hadoop Hive database called CDW_SAPP with 
+these four internal managed tables in the Hive Warehouse: CDW_SAPP_BRANCH, CDW_SAPP_CREDITCARD, CDW_SAPP_CUSTOMER, 
+CDW_SAPP_D-TIME.
+ 
+Here are the HIVE commands to CREATE and DESCRIBE each HIVE table:
+-- Create DATABASE called hive_cdw_sapp to hold the Branch, Credit Card, and Customer tables.
+CREATE DATABASE IF NOT EXISTS hive_cdw_sapp;
+
+-- Use DESCRIBE DATABSE to check that hive-cdw_sapp was created correctly and that its location 
+-- agrees with this: 
+-- db_name             comment
+-- hive_cdw_sapp       "" 
+-- Location: hdfs://sandbox.hortonworks.com:8020/apps/hive/warehouse/hive_cdw_sapp.db 
+-- owner_name    owner_type     parameters
+-- maria_dev         USER       ""
+
+DESCRIBE DATABASE hive_cdw_sapp;
+-- To make sure you are putting the new tables in the hive_cdw_sapp database explicitly name it.
+-- Emergency DELETEs in case structure of HIVE tables need to be changed
+-- DROP TABLE hive_cdw_sapp.hive_cdw_sapp_branch; 
+-- DROP TABLE hive_cdw_sapp.hive_cdw_sapp_creditcard;
+-- DROP TABLE hive_cdw_sapp.hive_cdw_sapp_customer;
+-- DROP TABLE hive_cdw_sapp.hive_cdw_sapp_d_time;
+
+USE hive_cdw_sapp;
+-- Create the INTERNAL HIVE table hive_cdw_sapp_branch in the hive_cdw_sapp database.
+
+CREATE TABLE hive_cdw_sapp.hive_cdw_sapp_branch (
+  branch_code        INT,
+  branch_name        VARCHAR(25),
+  branch_street      VARCHAR (30),
+  branch_city        VARCHAR (30),
+  branch_state       VARCHAR (30),
+  branch_zip         INT,
+  branch_phone       VARCHAR (10),
+  last_updated       TIMESTAMP
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_branch to check the Hive table was defined OK.
+-- Database: hive_cd_sapp 
+-- Managed Table
+-- Location: hdfs://sandbox.hortonworks.com:8020/apps/hive/warehouse/hive_cdw_sapp.db/hive_cdw_sapp_branch	
+-- hive_cdw_sapp.db/hive_cdw_sapp_branch
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_branch;
+
+-- Create the INTERNAL HIVE table hive_cdw_sapp_creditcard in the hive_cdw_sapp database.
+CREATE TABLE hive_cdw_sapp.hive_cdw_sapp_creditcard (
+  transaction_id         INT,
+  timeid                 VARCHAR(8),
+  credit_card_no         VARCHAR(16),
+  cust_ssn               INT,
+  branch_code            INT,
+  transaction_type       VARCHAR(30),
+  transaction_value      DECIMAL(20,3)
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_creditcard to check the Hive table was defined OK.
+-- Database: hive_cd_sapp
+-- Managed Table
+-- Location: hdfs://sandbox.hortonworks.com:8020/apps/hive/warehouse/hive_cdw_sapp.db/hive_cdw_sapp_creditcard	
+-- hive_cdw_sapp.db/hive_cdw_sapp_creditcard
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_creditcard;
+
+-- Create the INTERNAL HIVE table hive_cdw_sapp_customer  inside  the hive_cdw_sapp database.
+CREATE TABLE hive_cdw_sapp.hive_cdw_sapp_customer(
+  first_name           VARCHAR(40),
+  middle_name          VARCHAR(40),
+  last_name            VARCHAR(40),
+  ssn                  INT,
+  credit_card_no       VARCHAR(16) ,
+  street_name_apt      VARCHAR(40),
+  cust_city            VARCHAR(30),
+  cust_state           VARCHAR(30),
+  cust_country         VARCHAR(30),
+  cust_zip             VARCHAR(7),
+  cust_phone           INT,
+  cust_email           VARCHAR(40),
+  last_updated         TIMESTAMP
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_customer to check the Hive table was defined OK.
+-- Database: hive_cd_sapp
+-- Managed Table
+-- Location: hdfs://sandbox.hortonworks.com:8020/apps/hive/warehouse/hive_cdw_sapp.db/hive_cdw_sapp_customer
+-- hive_cdw_sapp.db/hive_cdw_sapp_customer
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_customer;
+
+-- Create the INTERNAL HIVE table hive_cdw_sapp_d_time in the hive_cdw_sapp database.
+CREATE TABLE hive_cdw_sapp.hive_cdw_sapp_d_time (
+  time_id              VARCHAR(8),
+  tday                 INT,
+  tmonth               INT,
+  tquarter             VARCHAR(8),
+  tyear                INT
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_d_tiime to check the Hive table was defined OK.
+-- Database: hive_cd_sapp
+-- Managed Table
+-- Location: hdfs://sandbox.hortonworks.com:8020/apps/hive/warehouse/hive_cdw_sapp.db/hive_cdw_sapp_d_time
+-- hive_cdw_sapp.db/hive_cdw_sapp_d_time
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_d_time;
+
+-------------------------------------------------------------------------------------------------------------------------------
+
+-- Create EXTERNAL HIVE Tables
+USE hive_cdw_sapp;
+-- Create the EXTERNAL HIVE table hive_cdw_sapp_branch_external in the hive_cdw_sapp database on folder /Credit_Card_System/.
+
+CREATE EXTERNAL TABLE hive_cdw_sapp.hive_cdw_sapp_branch_external (
+  branch_code        INT,
+  branch_name        VARCHAR(25),
+  branch_street      VARCHAR (30),
+  branch_city        VARCHAR (30),
+  branch_state       VARCHAR (30),
+  branch_zip         INT,
+  branch_phone       VARCHAR (10),
+  last_updated       TIMESTAMP
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION "/Credit_Card_System/hive_cdw_sapp_branch_external";
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_branch_external to check the Hive table was defined OK.
+-- Database: hive_cd_sapp 
+-- EXTERNAL TABLE
+-- Location: hdfs://sandbox.hortonworks.com:8020/Credit_Card_System/hive_cdw_sapp_branch_external	
+-- hive_cdw_sapp.db/hive_cdw_sapp_branch_external
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_branch_external;
+
+-- Create the EXTERNAL HIVE table hive_cdw_sapp_creditcard_external in the hive_cdw_sapp database on folder /Credit_Card_System/.
+CREATE TABLE hive_cdw_sapp.hive_cdw_sapp_creditcard_external (
+  transaction_id         INT,
+  timeid                 VARCHAR(8),
+  credit_card_no         VARCHAR(16),
+  cust_ssn               INT,
+  branch_code            INT,
+  transaction_type       VARCHAR(30),
+  transaction_value      DECIMAL(20,3)
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION "/Credit_Card_System/hive_cdw_sapp_creditcard_external";
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_creditcard_external to check the Hive table was defined OK.
+-- Database: hive_cd_sapp
+-- EXTERNAL TABLE
+-- Location: hdfs://sandbox.hortonworks.com:8020/Credit_Card_System/hive_cdw_sapp_creditcard_external	
+-- hive_cdw_sapp.db/hive_cdw_sapp_creditcard_external
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_creditcard_external;
+
+-- Create the EXTERNAL HIVE table hive_cdw_sapp_customer_external inside the hive_cdw_sapp database on folder /Credit_Card_System/.
+CREATE EXTERNAL TABLE hive_cdw_sapp.hive_cdw_sapp_customer_external(
+  first_name           VARCHAR(40),
+  middle_name          VARCHAR(40),
+  last_name            VARCHAR(40),
+  ssn                  INT,
+  credit_card_no       VARCHAR(16) ,
+  street_name_apt      VARCHAR(40),
+  cust_city            VARCHAR(30),
+  cust_state           VARCHAR(30),
+  cust_country         VARCHAR(30),
+  cust_zip             VARCHAR(7),
+  cust_phone           INT,
+  cust_email           VARCHAR(40),
+  last_updated         TIMESTAMP
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION "/Credit_Card_System/hive_cdw_sapp_customer_external";
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_customer_external to check the Hive table was defined OK.
+-- Database: hive_cd_sapp
+-- EXTERNAL TABLE
+-- Location: hdfs://sandbox.hortonworks.com:8020/Credit_Card_System/hive_cdw_sapp_customer_external
+-- hive_cdw_sapp.db/hive_cdw_sapp_customer_external
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_customer_external;
+
+-- Create the EXTERNAL HIVE table hive_cdw_sapp_d_time_external in the hive_cdw_sapp database on folder /Credit_Card_System/.
+CREATE EXTERNAL TABLE hive_cdw_sapp.hive_cdw_sapp_d_time_external (
+  time_id              VARCHAR(8),
+  tday                 INT,
+  tmonth               INT,
+  tquarter             VARCHAR(8),
+  tyear                INT
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION "/Credit_Card_System/hive_cdw_sapp_d_time_external";
+
+-- Run DESCRIBE FORMATTED hive_cdw_sapp_d_time_external to check the Hive table was defined OK.
+-- Database: hive_cd_sapp
+-- EXTERNAL TABLE
+-- Location: hdfs://sandbox.hortonworks.com:8020/Credit_Card_System/hive_cdw_sapp_d_time_external	
+-- hive_cdw_sapp.db/hive_cdw_sapp_d_time_external
+DESCRIBE FORMATTED hive_cdw_sapp.hive_cdw_sapp_d_time_external;
+
+-- Current Information on HDF HIVE (Managed or Internal): 
+
+-- Current Information on HDF HIVE (Internal and External: 
+hive_cdw_sapp
+
+hive_cdw_sapp_branch
+branch_code       INT
+branch_name       VARCHAR(25)
+branch_street     VARCHAR(30)
+branch_city       VARCHAR(30)
+branch_state      VARCHAR(30)
+branch_zip        INT
+branch_phone      VARCHAR(10)
+last_updated      TIMESTAMP
+
+hive_cdw_sapp_branch_external
+branch_code       INT
+branch_name       VARCHAR(25)
+branch_street     VARCHAR(30)
+branch_city       VARCHAR(30)
+branch_state      VARCHAR(30)
+branch_zip        INT
+branch_phone      VARCHAR(10)
+last_updated      TIMESTAMP
+
+hive_cdw_sapp_creditcard
+transaction_id    INT
+timeid            VARCHAR(8)
+credit_card_no    VARCHAR(16)
+cust_ssn          INT
+branch_code       INT
+transaction_type  VARCHAR(30)
+transaction_value DECIMAL(20,3)
+
+hive_cdw_sapp_creditcard_external
+transaction_id    INT
+timeid            VARCHAR(8)
+credit_card_no    VARCHAR(16)
+cust_ssn          INT
+branch_code       INT
+transaction_type  VARCHAR(30)
+transaction_value DECIMAL(20,3)
+
+hive_cdw_sapp_customer
+first_name        VARCHAR(40)
+middle_name       VARCHAR(40)
+last_name         VARCHAR(40)
+ssn               INT
+credit_card_no    VARCHAR(16)
+street_name_apt   VARCHAR(40)
+cust_city         VARCHAR(30)
+cust_state        VARCHAR(30)
+cust_country      VARCHAR(30)
+cust_zip          VARCHAR(7)
+cust_phone        INT
+cust_email        VARCHAR(40)
+last_updated      TIMESTAMP
+
+hive_cdw_sapp_customer_external
+first_name        VARCHAR(40)
+middle_name       VARCHAR(40)
+last_name         VARCHAR(40)
+ssn               INT
+credit_card_no    VARCHAR(16)
+street_name_apt   VARCHAR(40)
+cust_city         VARCHAR(30)
+cust_state        VARCHAR(30)
+cust_country      VARCHAR(30)
+cust_zip          VARCHAR(7)
+cust_phone        INT
+cust_email        VARCHAR(40)
+last_updated      TIMESTAMP
+
+hive_cdw_sapp_d_time
+time_id           VARCHAR(8)
+tday              INT
+tmonth            INT
+tquarter          VARCHAR(8)
+tyear             INT
+
+hive_cdw_sapp_d_time_external
+time_id           VARCHAR(8)
+tday              INT
+tmonth            INT
+tquarter          VARCHAR(8)
+tyear             INT
+
+Step 3: Create Sqoop Jobs to LOAD Data From MYSQL to Corresponding Apache Hive Tables.
+-- Use sqoop list-databases to confirm you have connectivity and visibility into the MySQL database.
+sqoop list-databases --connect jdbc:mysql://localhost/ 
+--driver com.mysql.jdbc.Driver --username root --password mysql
+
+-- The cdw_sapp is available, so list the tables in cdw_sapp using the Sqoop list-tables command. 
+-- Note that you have to add the database that you want Sqoop to access in the jdbc:mysql URL:
+sqoop list-tables --connect jdbc:mysql://localhost/cdw_sapp --username root --password mysql
+
+Need Inital Load Sqoop Job and Append Sqoop Job for each table. Explicitly name everything to document
+Inital Load Sqoop Job for each table. 
+-- Sqoop Import incremental append of cdw_sapp_branch into hive_cdw_sapp_branch with conversions by select
+sqoop job --create branch_load_initial 
+--import 
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver 
+--username root 
+--password hadoop
+--query "SELECT BRANCH_CODE,  
+		BRANCH_NAME, 
+		BRANCH_STREET, 
+		BRANCH_CITY, 
+		BRANCH_STATE, 
+		ifnull(BRANCH_ZIP, 0),
+		concat("(", right(BRANCH_PHONE,3) , ")" , mid(BRANCH_PHONE,4,3) , "-", right(BRANCH_PHONE,4))
+
+ 		LAST_UPDATED
+         FROM cdw.sapp.cdw_sapp_branch
+        WHERE \$CONDITIONS"
+--as-textfile
+
+--m 1
+
+--target-dir /Credit_Card_System/
+--verbose
+
+-- Sqoop Import incremental append of cdw_sapp_creditcard into hive_cdw_sapp_creditcard with conversions by select
+sqoop job --create creditcard_load_initial 
+--import 
+
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver 
+
+--username root 
+--password hadoop
+--query "SELECT TRANSACTION_ID,
+		concat(YEAR, MONTH, DAY)  
+		CREDIT_CARD_NO, 
+		CUST_SSN,
+		BRANCH_CODE,
+		TRANSACTION_TYPE,
+		TRANSACTION_VALUE
+         FROM cdw.sapp.cdw_sapp_creditcard
+        WHERE \$CONDITIONS"
+
+--as-textfile
+--m 1 
+
+--target-dir /Credit_Card_System/ 
+--verbose
+
+-- Sqoop Import incremental append of cdw_sapp_customer into hive_cdw_sapp_customer with conversions by select
+sqoop job --create customer_load_initial 
+--import 
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver 
+
+--username root 
+--password hadoop
+--query "SELECT concat(upper(substr(FIRST_NAME,1, 1)), lower(substr(FIRST_NAME,2, 39))),
+
+                lower(MIDDLE_NAME), 
+	   
+                concat(upper(substr(LAST_NAME,1, 1)), lower(substr(LAST_NAME,2, 39))), 
+	   
+                SSN,
+	   
+                CREDIT_CARD_NO,
+
+                concat(STREET_NAME, ',', APT_NO) 
+	   
+                CUST_CITY, 
+	   
+                CUST_STATE,
+	    
+                CUST_COUNTRY, 
+	   
+                CUST_ZIP, 
+	   
+                concat(right(CUST_PHONE,3), "-" ,  right(CUST_PHONE,4)),
+	   
+                CUST_EMAIL, 
+	   
+                LAST_UPDATED
+  
+
+         FROM cdw_sapp.cdw_sapp_customer
+        WHERE \$CONDITIONS"
+
+--as-textfile
+--m 1 
+
+--target-dir /Credit_Card_System/  
+--verbose
+
+-- Sqoop Import incremental append of cdw_sapp_d_time into hive_cdw_sapp_d_time with conversions by select
+sqoop job --create d_time_load_initial 
+--import 
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver
+--username root 
+--password hadoop
+--query "SELECT TIME_TIME_ID,
+		TIME_DAY, 
+		TIME_MONTH, 
+		TIME_QUARTER, 
+		TIME_YEAR 
+         FROM cdw.sapp.cdw_sapp_d_time
+        WHERE \$CONDITIONS"
+
+--as-textfile
+--m 1 
+
+--target-dir /Credit_Card_System/
+--verbose
+
+Need Append Sqoop Job for each table. 
+-- Sqoop Import incremental append of cdw_sapp_branch into hive_cdw_sapp_branch with conversions by select
+sqoop job --create branch_load_append 
+--import 
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver 
+--username root 
+--password hadoop
+--query "SELECT BRANCH_CODE,  
+		BRANCH_NAME, 
+		BRANCH_STREET, 
+		BRANCH_CITY, 
+		BRANCH_STATE, 
+		ifnull(BRANCH_ZIP, 0),
+		concat("(", right(BRANCH_PHONE,3) , ")" , mid(BRANCH_PHONE,4,3) , "-", right(BRANCH_PHONE,4))
+
+ 		LAST_UPDATED
+         FROM cdw.sapp.cdw_sapp_branch
+        WHERE \$CONDITIONS"
+
+--as-textfile
+
+--m 1
+
+--target-dir /Credit_Card_System/
+--append
+--verbose
+
+-- Sqoop Import incremental append of cdw_sapp_creditcard into hive_cdw_sapp_creditcard with conversions by select
+sqoop job --create creditcard_load_append 
+--import 
+
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver 
+
+--username root 
+--password hadoop
+--query "SELECT TRANSACTION_ID,
+		concat(YEAR, MONTH, DAY)  
+		CREDIT_CARD_NO, 
+		CUST_SSN,
+		BRANCH_CODE,
+		TRANSACTION_TYPE,
+		TRANSACTION_VALUE
+         FROM cdw.sapp.cdw_sapp_creditcard
+        WHERE \$CONDITIONS"
+
+--as-textfile
+--m 1 
+
+--target-dir /Credit_Card_System/
+--append 
+--verbose
+
+-- Sqoop Import incremental append of cdw_sapp_customer into hive_cdw_sapp_customer with conversions by select
+sqoop job --create customer_load_append 
+--import 
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver 
+
+--username root 
+--password hadoop
+--query "SELECT concat(upper(substr(FIRST_NAME,1, 1)), lower(substr(FIRST_NAME,2, 39))),
+
+                lower(MIDDLE_NAME), 
+	   
+                concat(upper(substr(LAST_NAME,1, 1)), lower(substr(LAST_NAME,2, 39))), 
+	   
+                SSN,
+	   
+                CREDIT_CARD_NO,
+
+                concat(STREET_NAME, ',', APT_NO) 
+	   
+                CUST_CITY, 
+	   
+                CUST_STATE,
+	    
+                CUST_COUNTRY, 
+	   
+                CUST_ZIP, 
+	   
+                concat(right(CUST_PHONE,3), "-" ,  right(CUST_PHONE,4)),
+	   
+                CUST_EMAIL, 
+	   
+                LAST_UPDATED
+  
+
+         FROM cdw_sapp.cdw_sapp_customer
+        WHERE \$CONDITIONS"
+
+--as-textfile
+--m 1 
+
+--target-dir /Credit_Card_System/ 
+--append 
+--verbose
+
+-- Sqoop Import incremental append of cdw_sapp_d_time into hive_cdw_sapp_d_time with conversions by select
+sqoop job --create d_time_load_append 
+--import 
+
+--connect jdbc:mysql://localhost/cdw_sapp 
+
+--driver com.mysql.jdbc.Driver
+--username root 
+--password hadoop
+--query "SELECT TIME_TIME_ID,
+		TIME_DAY, 
+		TIME_MONTH, 
+		TIME_QUARTER, 
+		TIME_YEAR 
+         FROM cdw.sapp.cdw_sapp_d_time
+        WHERE \$CONDITIONS"
+--as-textfile
+--m 1 
+
+--target-dir /Credit_Card_System/
+--append
+--verbose
+
+
+Step 4: Create Oozie Job to run Sqoop Script Automatically
+branch_load_initial
+creditcard_load_initial
+customer_load_initial
+d_time_load_initial
+branch_load_append
+creditcard_load_append
+customer_load_append
+d_time_load_append
+
+
+Step 5: Create Three Java Programs to Access Branch, Credit Card, and Customer with getters and setters
+Done
+
+Step 6: Create Data Access Objects to Access the MYSQL Tables using the Java Programs
+Done 
+
+Step 7: Create Java Programs to Access the Hive Tables using Map Reduce
+
+Step 8: Create Pig Scripts to do the Same Thing as the Map Reduce Java Programs
+
+
+
